@@ -63,13 +63,16 @@ keywords = [ "define"
 eval :: Val -> EvalState Val
 
 -- Self-evaluating expressions
--- TODO: What's self-evaluating?
-eval v@(Number _) = unimplemented "Evaluating numbers"
-eval v@(Boolean _) = unimplemented "Evaluating booleans"
+eval v@(Number _) = return v
+eval v@(Boolean _) = return v
 
 -- Symbol evaluates to the value bound to it
--- TODO
-eval (Symbol sym) = unimplemented "Evaluating symbols"
+eval (Symbol sym) =
+  do env <- get
+     case H.lookup sym env of
+       Nothing -> throwError $ UndefSymbolError sym
+       Just val -> return val
+
 
 -- Function closure is also self-evaluating
 eval v@(Func _ _ _) = return v
@@ -93,13 +96,10 @@ eval expr@(Pair v1 v2) = case flattenList expr of
     evalList [] = throwError $ InvalidExpression expr
 
     -- quote
-    -- TODO
-    evalList [Symbol "quote", e] = unimplemented "Special form `quote`"
+    evalList [Symbol "quote", e] = return e
 
     -- unquote (illegal at surface evaluation)
-    -- TODO: since surface-level `unquote` is illegal, all you need to do is
-    -- to throw a diagnostic
-    evalList [Symbol "unquote", e] = unimplemented "Special form `unquote`"
+    evalList [Symbol "unquote", e] = throwError $ UnquoteNotInQuasiquote e
 
     -- quasiquote
     evalList [Symbol "quasiquote", e] = evalQuasi 1 e where
@@ -116,10 +116,21 @@ eval expr@(Pair v1 v2) = case flattenList expr of
       evalQuasi _ v = return v
 
     -- cond
-    -- TODO: Handle `cond` here. Use pattern matching to match the syntax
-
+    evalList ((Symbol "cond"):pairs) = case pairs of [] -> invalidSpecialForm "cond"
+                                                     _ -> mapM getListOf2 pairs >>= evalCond 
+                                                                  where evalCond [] = return Void
+                                                                        evalCond [(Symbol "else",e)] = eval e
+                                                                        evalCond ((Symbol "else",_):_) = invalidSpecialForm "cond"
+                                                                        evalCond ((c,e):ces) = eval c >>= \cond-> case cond of Boolean False -> evalCond ces
+                                                                                                                               _ -> eval e 
     -- let
-    -- TODO: Handle `let` here. Use pattern matching to match the syntax
+    evalList [Symbol "let", Pair x y, body] =
+      do env <- get
+         lst <- H.fromList <$> getBinding (Pair x y)
+         put $ H.union lst env
+         v <- eval body
+         put env
+         return v
 
     -- lambda
     -- TODO: Handle `lambda` here. Use pattern matching to match the syntax
